@@ -1,0 +1,567 @@
+---
+title: "Firsts vs. Seconds Inaugural Speeches in The U.S. - Words as Emotional Weapons"
+author: "Carlos Ahumada"
+date: "May 16th, 2019"
+output:
+  html_notebook:
+    toc: true 
+    toc_depth: 3  
+    theme: united  
+    highlight: tango  
+---
+
+# Introduction 
+Words have the power to make us feel happy, angry, curious, sad, loved, and a large list of other emotions. A right word in the right moment can change our lives or the course of history. In many ocassions, our emotions dictate our actions and shape our support or aversion towards certain things, people, sport teams, or policy positions. In April 2018, Michal Reifen-Tagar and Orly Idan, two researchers at the Interdisciplinary Centre Herzliya, in Israel, published the [paper](https://journals.sagepub.com/doi/10.1177/0956797618772823) "A Rose by Any Other Name? A Subtle Linguistic Cue Impacts Anger and Corresponding Policy Support in Intractable Conflict". In this study, by measuring the different levels of support and aversion to certain policies in the context of the Israeli-Palestinian conflict, the authors concluded that a good way to use language to reduce tension is to rely, whenever possible, on nouns rather than verbs. The authors found support for the hypothesis that phrasing conflict-relevant policies in noun form (vs. verb form) would reduce anger and impact policy support correspondingly. 
+
+# Research Question
+Inspired by the work of these academics, the following project aims to find differences between the firsts and seconds inaugural speeches of U.S. Presidents. Are there any substantive differences between these two speeches? Do different term speeches have different emotional content? 
+
+# Data
+To perform this research I am going to use the U.S. Inaugural Speeches database. The only major modification that was done to it was the removal of the third and fourth term speeches of Franklin D. Roosevelt, the only U.S. President who have served more than two terms. 
+
+# Descriptive Analysis
+Before getting into to the sentiment analysis and finding out the noun/verb ratio, some general descriptive statistics are provided. The firts chart shows the number of speeches in each one of the categories just for reference. 
+
+```{r include=FALSE}
+library (stringi)
+library(reshape2)
+library(stopwords)
+library (ggplot2)
+library(RColorBrewer)
+library (dplyr)
+library (magrittr)
+library(tidytext)
+library (quanteda)
+library(SnowballC)
+library (stringi)
+library(stringr)
+library(reshape2)
+library(text2vec)
+library(knitr)
+```
+
+```{r include=FALSE}
+#Loading dataset
+speeches <- read.csv("C:/Users/carlo/Desktop/speeches.csv", encoding = "UTF-8")
+
+#cleaning dataset
+names(speeches) <- c("id", "name", "term", "date", "text")
+speeches$text <-  gsub("Fellow Citizens:  " ,"", speeches$text)
+speeches$text <-  gsub("Fellow-Citizens:  " ,"", speeches$text)
+speeches$text <-  gsub("Fellow Citizens:  " ,"", speeches$text)
+speeches$text <- gsub("\\?+","'",iconv(speeches$text, "latin1", "ASCII", sub=""))
+speeches$text <-  gsub("My fellow citizens:" ,"", speeches$text)
+speeches$text <-  gsub("My Countrymen:  " ,"", speeches$text)
+speeches$text <- tolower(speeches$text)
+
+```
+
+
+```{r echo=FALSE}
+#Descriptive statistics 
+ggplot(speeches, aes(factor(term),fill = term)) +
+geom_bar(alpha = 0.6, stat="count", position = "dodge") +
+  ggtitle('Number of Inauguaral Speechs by Term') +
+  xlab('Term') +
+  ylab('Number of Inaugural Speeches') +
+  theme(panel.grid.major = element_line(size = .5, color = "grey"),
+          axis.title = element_text(size = rel(.8)),
+          axis.text = element_text(size = rel(.9)))
+
+```
+
+```{r include=FALSE}
+#Counting words in the speeches
+speeches$word_count <- sapply(strsplit(speeches$text, " "), length)
+speeches$word_count <- as.numeric(speeches$word_count)
+
+#Visualizing word counts
+speeches %>%
+  group_by(term) %>%
+  summarise(Observations = n(), 
+            Mean_Word_Count = mean(word_count),
+            SD_Word_Count = sd(word_count),
+            Median_Word_Count = median(word_count)) %>%
+  arrange(desc(Mean_Word_Count))
+
+```
+The chart below, shows how second speeches seem to be, in average, much shorter than first inaugural sepeches. Moreover, Second Inaugural Speeches show less variance than Firsts ones. It is important to take into account that the means presented are driven also by outliers on both ends: very short and very large speeches.  
+```{r echo=FALSE}
+#Creating data for the means
+means_data <- speeches %>% 
+        group_by(term) %>% 
+        summarise(word_count = mean(word_count))
+
+#Plotting means and observations
+ggplot(speeches, aes(x = term, y = word_count, color = term, fill = term)) +
+  geom_bar(data = means_data, stat = "identity", alpha = .3) +
+  ggrepel::geom_text_repel(aes(label = speeches$name), color = "black", size = 2.5, segment.color = "grey") +
+  geom_point() +
+  guides(color = "none", fill = "none") +
+  theme_bw() +
+  labs(
+    title = "Speech Length of Inaugural Speech by Term",
+    x = "Term",
+    y = "Number of Words"
+  )
+
+```
+
+The two charts below show the most frequent words in the Firsts and Second Inaugural Speeches. The words *government*, *people*, *country* *world*, and *nation* occupy in both groups the first places. In the First Inaugural Speeches, the sum of the words *country* and *nation*, both refering most likely to the U.S., is much larger than the frequency of the word *world*. The same is happening for the second term speeches, but now using the words *america* (instead of *country*) and *nation*. In the second term speeches, the word *peace* is relatively more used than in first speeches, a possible sign of more conciliatory messages. 
+
+```{r include=FALSE}
+#Tidying speeches
+speeches_tidy <- speeches %>%
+  group_by(term) %>%
+  ungroup()
+tidy_speeches <- speeches_tidy %>%
+  unnest_tokens(word, text)
+
+#Removing bad encoding
+tidy_speeches <- tidy_speeches [tidy_speeches$word!= "0097", ]
+#Visualizing first rows
+tail(tidy_speeches, n=20)
+
+#Removing stop words
+data(stop_words)
+tidy_speeches <- tidy_speeches %>%
+  anti_join(stop_words)
+
+#Finding most frequent words
+tidy_speeches %>%
+  count(word, sort = TRUE) 
+
+```
+
+
+```{r echo=FALSE}
+#Plotting most frequent words
+tidy_speeches %>% filter (term=="First Inaugural Address") %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 150) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill=count)) +
+  geom_col(fill = "#F8766D", alpha = .6) +
+  ggtitle('Most Frequent Words in First Inaugural Sppeches') +
+  xlab('Words') +
+  ylab('Frequency') +
+  coord_flip()
+```
+
+
+```{r echo=FALSE}
+#Plotting most frequent words
+tidy_speeches %>% filter (term=="Second Inaugural Address") %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 70) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill=count)) +
+  geom_col(fill = "#00BFC4", alpha = .6) +
+  ggtitle('Most Frequent Words in Second Inaugural Sppeches') +
+  xlab('Words') +
+  ylab('Frequency') +
+  coord_flip()
+```
+
+Now, using a tf-idf analysis, the most representative words of each group. The tf-idf, short for term frequency-inverse document frequency, is a numerical statistic that is intended to reflect how important a word is to a document in a collection or corpus.
+
+```{r echo=FALSE}
+#Creating tf-idf for US and RUS speeches for speeches between 1980
+df_tf_idf <- tidy_speeches %>%
+    count(term, word, sort = TRUE) %>%
+    bind_tf_idf(word, term, n) %>%
+    arrange(-tf_idf) %>%
+    group_by(term) %>%
+    top_n(8) %>%
+    ungroup
+
+options(scipen=999)
+
+#Plotting
+df_tf_idf %>%
+    mutate(word = reorder(word, tf_idf)) %>%
+    ggplot(aes(word, tf_idf, fill = term)) +
+    geom_col(alpha = 0.6, show.legend = FALSE) +
+    facet_wrap(~ term, scales = "free", ncol = 3) +
+    coord_flip() +
+    theme(strip.text=element_text(size=11)) +
+    labs(x = NULL, y = "tf-idf",
+         title = "Highest tf-idf words in speeches for first and second terms")
+```
+As it can see, the most representative words in the first term speeches refer to what can be classified as local affairs. The topics refer to law, capital, enforcement, democracy (*majorityy*/*controversies*). On the contrary, the most representative words in the second terms speeches refer foreign policy, making mentions of *Spain*, *Cuba*, and an *island*. Surprisingly, also "cultural-related" words like *paint* and *song* scored high. It might be the case that these words are used more in a figurative than in a literal way.
+
+<br>
+
+# Sentiment Analysis
+
+Now, using sentiment dictionaries, the most frequent joy-related words are presented in the chart below. 
+```{r include=FALSE}
+#Dataframe for sentiment analysis
+sentiment <- speeches %>%
+  group_by (term) %>% 
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+#Loading sentiment dictionary
+get_sentiments("nrc")
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+joy <- sentiment %>% group_by(term) %>%
+  inner_join(nrc_joy) %>%
+  count(word, sort = TRUE) %>%
+  top_n(10) %>% arrange(n, desc(-n))  
+
+joy <- joy[order(-(joy$n)),]
+joy <- as.data.frame(joy)
+
+#Plotting
+joy <- joy %>%  mutate(
+    word = factor(word), n = as.double(n))%>%
+  mutate(word = reorder(word, n)) 
+
+#new dataframe
+table1 <- joy %>% group_by(term) %>% 
+    arrange(-n) %>%
+  top_n(10)  %>%
+   ungroup() %>% 
+ arrange(term, n) %>%
+  mutate(order = row_number())
+ 
+```
+
+```{r echo=FALSE}
+#plot
+ggplot(table1, aes(order, n, fill =term)) +
+  geom_bar(alpha = 0.6, stat = "identity", show.legend = FALSE) +
+  facet_wrap(~ term, scales = "free") +
+  ggtitle('Frequency of joy-related words in speeches by term') +
+  xlab('Words') +
+  ylab('Frequency') +
+   scale_x_continuous(
+    breaks = table1$order,
+    labels = table1$word,
+    expand = c(0,0))+
+   theme(strip.text=element_text(size=11)) +
+  coord_flip()
+```
+
+
+The two most frequent joy-related words in both groups are peace and freedom, in the same order. AFterwards, the two groups star to differ, with the exception of liberty in the same position for both groups. Interesting to see that *god* occupies a more predominant place in second term speeches and that *progress* becomes one of the three most frequent words, while in the first term period it appeared in the last pleace among the top 10 words. The word *faith* is among the top 10 words in first inaugural speeches, while in second terms it doesn't even appear. Similarly, the word *present* appears in second term speeches but not in the firsts ones. This might be an indication of Presidents trying to send more messages around hope and the future in their first speeches, and focusing more on the present momement in the second. <br>
+Now, in line with this analysis, the plot below shows the most frequent anger-related words. 
+```{r echo=FALSE}
+#Anger analysis
+
+#Loading sentiment dictionary
+nrc_anger <- get_sentiments("nrc") %>% 
+  filter(sentiment == "anger")
+
+anger <- sentiment %>% group_by(term) %>%
+  inner_join(nrc_anger) %>%
+  count(word, sort = TRUE) %>%
+  top_n(10) %>% arrange(n, desc(-n))  
+
+anger <- anger[order(-(anger$n)),]
+anger <- as.data.frame(anger)
+
+#Plotting
+anger <- anger %>%  mutate(
+    word = factor(word), n = as.double(n))%>%
+  mutate(word = reorder(word, n)) 
+
+#new dataframe
+table2 <- anger %>% group_by(term) %>% 
+    arrange(-n) %>%
+  top_n(10)  %>%
+   ungroup() %>% 
+ arrange(term, n) %>%
+  mutate(order = row_number())
+
+#plot
+ggplot(table2, aes(order, n, fill =term)) +
+  geom_bar(alpha = 0.6, stat = "identity", show.legend = FALSE) +
+  facet_wrap(~ term, scales = "free") +
+  ggtitle('Frequency of anger-related words in speeches by term') +
+  xlab('Words') +
+  ylab('Frequency') +
+   scale_x_continuous(
+    breaks = table2$order,
+    labels = table2$word,
+    expand = c(0,0))+
+   theme(strip.text=element_text(size=11)) +
+  coord_flip()
+```
+
+he first thing to notice is that the top ten anger related words in the second inaugural terms are much more diverse than in the firsts ones This might be due to the small sample of the second inaugural speeches, bur also might be an indication of Presidents using different words to express the same anger at different parts of their speeches, and justify their election for a second term. This theory is reinforced by the fact that in the second term speeches words like *conflict*, *challenge*, *threat*, and *struggle* appear among the ten most frequent words and not in the first term ones. 
+
+# Nouns - Verbs Analysis
+
+After showing some differences in the words and emotions in both type of speeches, an analysis of the use of nouns and verbs in line with the research of Michal Reifen-Tagar and Orly Idan is provided below. 
+
+First, let's make a general analysis of the groups. For this part of the analysis the *spacyr package* was used. *spacyr* is "an R wrapper to the Python (Cython) spaCy NLP system nicely integrated with quanteda. *spacyr* is designed to provide easy access to the powerful functionality of spaCy, in a simple format. This package, among other things, help to parse and tokenize documents, taging each token with its function as part of the speech (noun, verb, pronoun, adjective, etc.)
+
+```{r include=FALSE}
+#Loading Spacyr
+library("spacyr")
+library(tibble)
+spacy_initialize()
+
+#parsing speeches
+first_term <- speeches [speeches$term=="First Inaugural Address", ]
+second_term <- speeches [speeches$term=="Second Inaugural Address", ]
+first_term$doc_id <- paste(first_term$name, first_term$term, sep="-")
+second_term$doc_id <- paste(second_term$name, second_term$term, sep="-")
+
+first_term <- as_tibble(
+    data.frame(doc_id = first_term$doc_id, text = first_term$text, stringsAsFactors = F)
+)
+
+second_term <- as_tibble(
+    data.frame(doc_id =second_term$doc_id, text = second_term$text, stringsAsFactors = F)
+)
+
+
+first_term_parsed <- spacy_parse(first_term)
+first_term_parsed <- first_term_parsed [first_term_parsed$pos!="SPACE" & first_term_parsed$pos!="PUNCT", ]
+first_term_parsed
+table(first_term_parsed$pos)
+sum(table(first_term_parsed$pos))
+
+second_term_parsed <- spacy_parse(second_term)
+second_term_parsed <- second_term_parsed[second_term_parsed$pos!="SPACE" & second_term_parsed$pos!="PUNCT", ]
+second_term_parsed
+sum(table(second_term_parsed$pos))
+
+```
+
+```{r echo=TRUE}
+sum(first_term_parsed$pos=="NOUN")/sum(table(first_term_parsed$pos))*100
+```
+
+
+```{r echo=TRUE}
+sum(first_term_parsed$pos=="VERB")/sum(table(first_term_parsed$pos))*100
+```
+
+
+```{r echo=TRUE}
+sum(second_term_parsed$pos=="NOUN")/sum(table(second_term_parsed$pos))*100
+```
+
+
+```{r echo=TRUE}
+sum(second_term_parsed$pos=="VERB")/sum(table(second_term_parsed$pos))*100
+```
+
+```{r echo=FALSE}
+term_spacy <- c("First Term", "Second Term")
+nouns_spacy <- c(23.49, 23.66)
+verbs_spacy <- c(17.45, 17.88)
+
+table <- as.data.frame(cbind(term_spacy, nouns_spacy, verbs_spacy))
+names(table) <- c("term", "share of nouns", "share of verbs")
+kable(table)
+```
+
+The table above shows that there is almost no difference between the share of nouns and share of verbs between the first and second term speeches. According to the theory of the authors on which this project is based, U.S. Presidents, in general, do not look to reduce tensions on their inaugural speeches more in one group than in other. Naturally, in both cases nouns exceed the number of verbs. However, when looking at specific presidents, this might be the case. In order to choose two pairs of cases two compare, I am going to make use of cosine similarites to find out two very similar speeches and two very different speeches. Afterwards, a similar noun-verb analysis will be provided. 
+
+```{r include=FALSE}
+#Tokenization
+speeches3 <- speeches [ ,c(1,5,2,3,4,6)]
+names(speeches3)[1] <- "doc_id"
+speeches3$doc_id <- paste(speeches3$name, speeches3$term, sep="-")
+speeches3$name <- NULL
+speeches3$term <- NULL
+speeches3$text <- str_squish(speeches3$text)
+
+speeches_corpus <- corpus(speeches3, text_field = "text", docid_field= "doc_id")
+
+
+
+toks2 <- tokens(speeches_corpus,
+                remove_punct = TRUE,
+                remove_symbols = TRUE,
+                remove_numbers = TRUE,
+                remove_url = TRUE)
+
+toks2 <- tokens_select(toks2, c("[\\d-]", "[[:punct:]]", "^.{1}$"), 
+                       selection = "remove", 
+                    valuetype="regex", verbose = TRUE)
+
+toks2 <- tokens_remove(toks2, stopwords("english"), padding = TRUE)
+
+toks2 <- tokens(toks2,  ngrams = 1)
+
+dfm2 <- dfm(toks2, verbose = TRUE)
+head(featnames(dfm2),50)
+tail(featnames(dfm2),50)
+```
+
+```{r echo=TRUE}
+#Calculating cosine similarities for all documents
+cosine_sim <- textstat_simil(dfm2, selection = NULL, method = "cosine", margin = "documents")
+results <- (as.matrix(cosine_sim))
+pairs <- subset(melt(results), value!=1)
+pairs <- data.frame(t(apply(pairs, 1, sort)))
+pairs <- unique(pairs)
+pairs <- pairs [ ,c(3,2,1)]
+names(pairs)<- c("Speech1", "Speech2", "Cosine Similarity")
+pairs <- pairs[order(pairs$`Cosine Similarity`, decreasing = TRUE), ] 
+head(pairs, n=5)
+
+```
+
+```{r echo=FALSE}
+pairs <- pairs %>% filter(Speech1!="George Washington-Second Inaugural Address" & Speech2!= "George Washington-Second Inaugural Address")
+pairs <- pairs[order(pairs$`Cosine Similarity`),] 
+head(pairs, n=5)
+```
+The first pair of very similar speeches that were not given by the same President is the one composed by Reagan's Second Inaugural Address and Clinton's second inaugural address. For the most disimilar speeches the Second Inaugural Address of George Washington, which has been the shortest address ever given, was removed since it was present among all pairs of top disimilar speeches. To pick a pair in which at least one contemporary President is present, I am going to pick the pair of Donald Trump's first inaugural address and Andrew Jackson's first inagural address. 
+
+For the most similar speeches, besides Reagan's and Clinton's second term speeches, I am going to add George W. Bush's second address, since this one ocurred in the middle of the war on terror. For this last speech, a more conciliatory tone is expected, and for so, more use of nouns. For the most disimilar speeches, I am going to use Eisenhower's second speech, two years after the Vietnam War began. A similar tone to Bush's on his second term speech is expected. 
+
+
+```{r include=FALSE}
+#Analysis Reagan 2nd - Clinton 2nd
+reagan_2 <- second_term_parsed [second_term_parsed$doc_id=="Ronald Reagan-Second Inaugural Address" ,  ]
+sum(reagan_2$pos=="NOUN")/sum(reagan_2$pos=="VERB")
+```
+
+
+```{r include=FALSE}
+Clinton_2 <- second_term_parsed [second_term_parsed$doc_id=="Bill Clinton-Second Inaugural Address" ,  ]
+sum(Clinton_2$pos=="NOUN")/sum(Clinton_2$pos=="VERB")
+```
+
+```{r include=FALSE}
+Bush_2 <- second_term_parsed [second_term_parsed$doc_id=="George W. Bush-Second Inaugural Address" ,  ]
+csum(Bush_2$pos=="NOUN")/sum(Bush_2$pos=="VERB")
+
+```
+
+```{r echo=FALSE}
+President_and_term <- c("Reagan's Second Inaugural Speech", "Clinton's Second Inaugural Speech", "George W. Bush's Second Inaugural Speech")
+noun_verb_ratio <- c(1.29, 1.53, 1.67)
+table3 <- cbind(President_and_term, noun_verb_ratio)
+kable(table3)
+```
+
+The table above shows that Clinton have a higher noun/verb ratio than Reagan on their second term speeches. This might be an indication of Clinton being more conciliatory/calling for unit than Reagan. However, George W. Bush in his second term speech in 2005, was the one that reported the highest noun/verb ratio. This means that despite being in the middle of a War in Irak, Bush was using more nouns than presidents in relatively "calmer" years, probably aiming to obtain more support for his policies and foreign interventions. 
+
+Now let's see the noun verb ratio for most disimilar speeches. 
+
+
+```{r include=FALSE}
+#Analysis Reagan 2nd - Clinton 2nd
+trump_1 <- first_term_parsed [first_term_parsed$doc_id=="Donald J. Trump-First Inaugural Address" ,  ]
+sum(trump_1$pos=="NOUN")/sum(trump_1$pos=="VERB")
+```
+
+
+```{r include=FALSE}
+Jackson_1 <- first_term_parsed [first_term_parsed$doc_id=="Andrew Jackson-First Inaugural Address" ,  ]
+sum(Jackson_1$pos=="NOUN")/sum(Jackson_1$pos=="VERB")
+```
+
+```{r include=FALSE}
+Eisenhower_2 <- second_term_parsed [second_term_parsed$doc_id=="Dwight D. Eisenhower-Second Inaugural Address" ,  ]
+sum(Eisenhower_2$pos=="NOUN")/sum(Eisenhower_2$pos=="VERB")
+
+```
+
+```{r echo=FALSE}
+President_and_term <- c("Trumps's First Inaugural Speech", "Jackson's First Inaugural Speech", "Eisenhower's Second Inaugural Speech")
+noun_verb_ratio <- c(1.24, 1.37, 1.45)
+table4 <- cbind(President_and_term, noun_verb_ratio)
+kable(table4)
+```
+The table above show that Trump had the lowest noun verb ratio of the disimilar speeches. His low use of verb compared to nouns might prove that diplomats and politicians who do not care a lot in transmiting conciliatory messages have a lower use of nouns. In terms of the President who was facing a war, Eisenhower, he used more nouns compared to verbs compared to this disimilar pair, ut less nouns compared to verbs than George W. Bush in 2005. 
+
+# Word2Vec/GloVe
+Finally, I am going to use the Word2Vec package. In this process, a term co-occurance matrix will be converted into a matrix of short and dense vectors, rather than the long and sparse vectorization used for tf-idf. This will be useful to identify the meaning of words. The table below shows the vocabulary created from the corpus after the tokenisation process, removing stopwords and converting to lower case. The table is sorted in decreasing order by the number of documents in which a particular term appears. 
+<br>
+First I am going to use it to find the words that occurred more next to the most frequent word for the firsts inaugural speeches, and then do the same thing but for second ones. 
+
+```{r include=FALSE}
+#Preparing data
+prep_fun = tolower
+tok_fun = word_tokenizer
+
+it = itoken(first_term$text, 
+             preprocessor = prep_fun, 
+             tokenizer = tok_fun, 
+             ids = first_term$doc_id,
+             progressbar = FALSE)
+vocab = create_vocabulary(it, stopwords = stopwords(language = "en", source = "snowball"))
+vocab = prune_vocabulary(vocab, term_count_min=5)
+head(vocab[order(vocab$doc_count, decreasing = T),], n=10)
+```
+
+After creating the vocabulary, the vectorization can take place. The skip-gram algorithm from the Word2Vec package with a window of plus minus 5 words from the target word will be used. Once the vectors are ready, we can use them to identify the words that are close to others. It is important to metion that this is determined, again, by a cosine similarity method.  
+
+```{r include=FALSE}
+#Creating word vectors 
+vectorizer = vocab_vectorizer(vocab)
+vocab_tcm = create_tcm(it, vectorizer, skip_grams_window = 5)
+
+glove = GlobalVectors$new(word_vectors_size = 200, vocabulary = vocab, x_max = 10)
+first_wv_main = glove$fit_transform(vocab_tcm, n_iter = 100, convergence_tol = 0.00001)
+
+first_wv_context = glove$components
+first_word_vectors =  first_wv_main + t(first_wv_context)
+
+```
+
+```{r echo=TRUE}
+gov = first_word_vectors["government", , drop=F]
+cos_sim_first = sim2(x = first_word_vectors, y = gov, method = "cosine", norm = "l2")
+head(sort(cos_sim_first[,1], decreasing = T), 10)
+```
+In the table above, it can be seen that the word that appears more in the context of *government* is *people*, followed by words that alude to the type structure of the government: *federal* and *states*. Now let's do the same for second term speeches. It is important to notice the presence of two verbs: *can* and *may*. 
+
+
+```{r include=FALSE}
+#Preparing data
+it = itoken(second_term$text, 
+             preprocessor = prep_fun, 
+             tokenizer = tok_fun, 
+             ids = second_term$doc_id,
+             progressbar = FALSE)
+vocab = create_vocabulary(it, stopwords = stopwords(language = "en", source = "snowball"))
+vocab = prune_vocabulary(vocab, term_count_min=5)
+head(vocab[order(vocab$doc_count, decreasing = T),], n=10)
+```
+
+```{r include=FALSE}
+#Creating word vectors 
+vectorizer = vocab_vectorizer(vocab)
+vocab_tcm = create_tcm(it, vectorizer, skip_grams_window = 5)
+
+glove = GlobalVectors$new(word_vectors_size = 200, vocabulary = vocab, x_max = 10)
+second_wv_main = glove$fit_transform(vocab_tcm, n_iter = 100, convergence_tol = 0.00001)
+
+second_wv_context = glove$components
+second_word_vectors =  second_wv_main + t(second_wv_context)
+
+```
+
+```{r echo=TRUE}
+gov = second_word_vectors["government", , drop=F]
+cos_sim_second = sim2(x = second_word_vectors, y = gov, method = "cosine", norm = "l2")
+head(sort(cos_sim_second[,1], decreasing = T), 10)
+```
+
+For the second term speeches, the words that appear in the context of *government* are different than in the first term speeches. In this case, also two verbs appear: *must* and *can*. The verb *must* is a stronger verb than *may*, present in the first term speeches. This migh be an indication that in second term speeches, U.S. Presidents might be less worried about releasing tension among citizens than in first term speeches when it come to governmental plans and actions. 
+
+# Conclusions and Ethics Discussion
+The study of U.S. Presidents' communication strategies has a gap on the comparisson between terms using Natural Language Methods. While some efforts have been done, the opportunities to continue exploring this topic under different frameworks are vast. In this project, I analyzed the differences between how Presidents addressed their audiences during firsts and seconds inaugural addresses. The analysis and disucssion was framed within a recent theory that states that diplomats and politicians can release tension and gain support for their policies just by using more verbs instead of nouns. This work provides support for the hypothesis of this scholars. According to the results presented, Presidents that were facing a crisis between its first and second terms have a higher noun/verb ratio that presidents who addressed the nation in calmer times. Furtheremore, the nouns that appeal to a crisis/challenge/threat were much more diverse during the second term speeches than the nouns associated to this topic in the first terms. It also seems that Presidents on their second term speech tried to tried to justify more their election towards the nation by presenting themselves as "saviors" rather than presenting themselves as leaders bringin new hope to citizens. 
+
+Regarding ethical considerations, it is important to mention that NLP techniques must be used carefully. Particularly, when studying large periods of time, researches must take into account the context in which different words and framings were used. When finding similar and disimilar speeches, a closer look should be made since actually different expressions and words might be more similar than what these processes might report. NLP methods cannot make this work for humans, at least for now. NLP catches up patterns and relations that reflect societal biases at different points in time. In this particular case, when a word was categorized as one that provoked negative or positive feelings, it was only based on a contemporary interpreation of the word and without the sensitivity that context and a deeper qualitative investigation can provide. Nevertheless, this NLP approach for the study of political communications in time can save resources when starting an investigation by providing initial clues on where starting to look. 
+
+
+
+
+
+
+
+
